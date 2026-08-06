@@ -110,16 +110,21 @@ class OnlineShopApp:
     # ============================================================
     # COMMON FUNCTIONS (For all users)
     # ============================================================
+    
     def show_products(self):
-        """Show all products with average rating and review count"""
+        """Show all products with full attributes"""
         self.clear_screen()
-        print("=" * 50)
+        print("=" * 80)
         print("📦 PRODUCT LIST")
-        print("=" * 50)
+        print("=" * 80)
         
         query = """
             SELECT p.Product_ID, p.Product_Name, c.Category_Name, 
                    p.Price, p.Stock_Quantity, u.Name AS Seller,
+                   p.Brand, p.Colors, p.Size, p.Material,
+                   p.Gender, p.Season, p.Discount, p.Discount_Price,
+                   p.IsFeatured, p.IsNew, p.IsBestSeller,
+                   p.Warranty, p.Return_Policy,
                    ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating,
                    COUNT(r.Review_ID) AS Review_Count
             FROM Product p
@@ -127,66 +132,266 @@ class OnlineShopApp:
             INNER JOIN [User] u ON p.Seller_ID = u.User_ID
             LEFT JOIN Review r ON p.Product_ID = r.Product_ID
             GROUP BY p.Product_ID, p.Product_Name, c.Category_Name, 
-                     p.Price, p.Stock_Quantity, u.Name
+                     p.Price, p.Stock_Quantity, u.Name,
+                     p.Brand, p.Colors, p.Size, p.Material,
+                     p.Gender, p.Season, p.Discount, p.Discount_Price,
+                     p.IsFeatured, p.IsNew, p.IsBestSeller,
+                     p.Warranty, p.Return_Policy
+            ORDER BY p.Product_ID
         """
         products = self.db.execute_query(query)
         
         if products:
-            print("-" * 100)
-            print(f"{'ID':<4} {'Product Name':<22} {'Category':<10} {'Price':<8} {'Stock':<6} {'Rating':<7} {'Reviews':<7} {'Seller':<12}")
-            print("-" * 100)
+            print("-" * 130)
+            print(f"{'ID':<4} {'Name':<18} {'Brand':<10} {'Category':<12} {'Price':<10} {'Stock':<6} {'Rating':<6} {'Seller':<10}")
+            print("-" * 130)
             for p in products:
-                rating = f"{p[6]:.1f}" if p[6] > 0 else "-"
-                print(f"{p[0]:<4} {p[1][:21]:<22} {p[2][:9]:<10} ${p[3]:<8} {p[4]:<6} {rating:<7} {p[7]:<7} {p[5][:11]:<12}")
+                rating = f"{p[19]:.1f}" if p[19] > 0 else "-"
+                brand = p[6] or "-"
+                price = p[3]
+                discount_price = p[13] or price
+                
+                print(f"{p[0]:<4} {p[1][:17]:<18} {brand[:9]:<10} {p[2][:11]:<12} ${discount_price:<10} {p[4]:<6} {rating:<6} {p[5][:9]:<10}")
+            
+            print("\n" + "-" * 130)
+            print("📌 View product details? Enter Product ID (or 0 to skip): ")
+            try:
+                view_id = int(input("Product ID: "))
+                if view_id > 0:
+                    self.show_product_details(view_id)
+            except ValueError:
+                pass
         else:
             print("❌ No products found!")
         
         input("\nPress Enter...")
     
-    def search_product(self):
-        """Search products by name or description with ratings"""
+    def show_product_details(self, product_id):
+        """Show full details of a specific product"""
         self.clear_screen()
-        print("=" * 50)
-        print("🔍 SEARCH PRODUCT")
-        print("=" * 50)
-        
-        keyword = input("Enter search keyword: ")
+        print("=" * 80)
+        print("📦 PRODUCT DETAILS")
+        print("=" * 80)
         
         query = """
             SELECT p.Product_ID, p.Product_Name, c.Category_Name, 
-                   p.Price, p.Stock_Quantity,
+                   p.Price, p.Stock_Quantity, u.Name AS Seller,
+                   p.Brand, p.Colors, p.Size, p.Material,
+                   p.Weight, p.Gender, p.Season, 
+                   p.Discount, p.Discount_Price,
+                   p.IsFeatured, p.IsNew, p.IsBestSeller,
+                   p.Views, p.Sales_Count,
+                   p.Warranty, p.Return_Policy,
+                   p.Video_URL, p.Image_URL,
                    ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating,
                    COUNT(r.Review_ID) AS Review_Count
             FROM Product p
             INNER JOIN Category c ON p.Category_ID = c.Category_ID
+            INNER JOIN [User] u ON p.Seller_ID = u.User_ID
             LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-            WHERE p.Product_Name LIKE ? OR p.Description LIKE ?
+            WHERE p.Product_ID = ?
             GROUP BY p.Product_ID, p.Product_Name, c.Category_Name, 
-                     p.Price, p.Stock_Quantity
+                     p.Price, p.Stock_Quantity, u.Name,
+                     p.Brand, p.Colors, p.Size, p.Material,
+                     p.Weight, p.Gender, p.Season, 
+                     p.Discount, p.Discount_Price,
+                     p.IsFeatured, p.IsNew, p.IsBestSeller,
+                     p.Views, p.Sales_Count,
+                     p.Warranty, p.Return_Policy,
+                     p.Video_URL, p.Image_URL
         """
-        products = self.db.execute_query(query, (f'%{keyword}%', f'%{keyword}%'))
+        result = self.db.execute_query(query, (product_id,))
         
-        if products:
-            print("\n📦 Search Results:")
-            print("-" * 70)
-            for p in products:
-                rating = f"{p[5]:.1f}" if p[5] > 0 else "-"
-                print(f"{p[0]}. {p[1]} - {p[2]} - ${p[3]} (Stock: {p[4]}) ⭐ {rating} ({p[6]} reviews)")
+        if result:
+            p = result[0]
+            rating = f"{p[24]:.1f}" if p[24] > 0 else "No ratings"
+            
+            print(f"\n🆔 ID: {p[0]}")
+            print(f"📝 Name: {p[1]}")
+            print(f"📂 Category: {p[2]}")
+            print(f"💰 Price: ${p[3]}")
+            if p[13] and p[13] > 0:
+                print(f"   🔥 Discount: {p[13]:.0f}% → ${p[14]:.2f}")
+            print(f"📦 Stock: {p[4]}")
+            print(f"👤 Seller: {p[5]}")
+            print(f"🏷️ Brand: {p[6] or 'N/A'}")
+            print(f"🎨 Colors: {p[7] or 'N/A'}")
+            print(f"📏 Sizes: {p[8] or 'N/A'}")
+            print(f"🧵 Material: {p[9] or 'N/A'}")
+            print(f"⚖️ Weight: {p[10] or 'N/A'} g")
+            print(f"👤 Gender: {p[11] or 'N/A'}")
+            print(f"🌤️ Season: {p[12] or 'N/A'}")
+            print(f"⭐ Rating: {rating} ({p[25]} reviews)")
+            print(f"👁️ Views: {p[18] or 0}")
+            print(f"📈 Sales: {p[19] or 0}")
+            print(f"🛡️ Warranty: {p[20] or 'N/A'}")
+            print(f"🔄 Return Policy: {p[21] or 'N/A'}")
+            if p[22]:
+                print(f"🎬 Video: {p[22]}")
+            if p[23]:
+                print(f"🖼️ Image: {p[23]}")
+            
+            # نشان دادن وضعیت‌ها
+            statuses = []
+            if p[15]: statuses.append("⭐ Featured")
+            if p[16]: statuses.append("🆕 New")
+            if p[17]: statuses.append("🏆 Best Seller")
+            if statuses:
+                print(f"🏷️ Status: {', '.join(statuses)}")
         else:
-            print("❌ No products found!")
+            print("❌ Product not found!")
+        
+        print("-" * 80)
+    
+    def search_product(self):
+        """Search products by any attribute (name, brand, color, size, material, etc.)"""
+        self.clear_screen()
+        print("=" * 80)
+        print("🔍 SEARCH PRODUCT")
+        print("=" * 80)
+        
+        print("\n🔎 Search by:")
+        print("  1. Keyword (name, brand, color, material)")
+        print("  2. Price range")
+        print("  3. Gender")
+        print("  4. Season")
+        print("  5. Brand")
+        
+        search_type = input("\nChoose search type (1-5): ")
+        
+        if search_type == '1':
+            keyword = input("Enter search keyword: ")
+            query = """
+                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                       p.Price, p.Discount_Price, p.Stock_Quantity,
+                       p.Colors, p.Size, p.Material,
+                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
+                FROM Product p
+                INNER JOIN Category c ON p.Category_ID = c.Category_ID
+                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
+                WHERE p.Product_Name LIKE ? OR p.Brand LIKE ? OR p.Colors LIKE ? 
+                   OR p.Material LIKE ? OR p.Description LIKE ?
+                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                         p.Price, p.Discount_Price, p.Stock_Quantity,
+                         p.Colors, p.Size, p.Material
+            """
+            params = (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', f'%{keyword}%')
+            products = self.db.execute_query(query, params)
+            
+        elif search_type == '2':
+            try:
+                min_price = float(input("Min price: $") or 0)
+                max_price = float(input("Max price: $") or 999999)
+                query = """
+                    SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                           p.Price, p.Discount_Price, p.Stock_Quantity,
+                           p.Colors, p.Size,
+                           ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
+                    FROM Product p
+                    INNER JOIN Category c ON p.Category_ID = c.Category_ID
+                    LEFT JOIN Review r ON p.Product_ID = r.Product_ID
+                    WHERE p.Price BETWEEN ? AND ?
+                    GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                             p.Price, p.Discount_Price, p.Stock_Quantity,
+                             p.Colors, p.Size
+                """
+                products = self.db.execute_query(query, (min_price, max_price))
+            except ValueError:
+                print("❌ Invalid price!")
+                input("\nPress Enter...")
+                return
+            
+        elif search_type == '3':
+            gender = input("Gender (Men/Women/Unisex/Kids): ")
+            query = """
+                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                       p.Price, p.Discount_Price, p.Stock_Quantity,
+                       p.Gender, p.Size,
+                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
+                FROM Product p
+                INNER JOIN Category c ON p.Category_ID = c.Category_ID
+                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
+                WHERE p.Gender = ?
+                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                         p.Price, p.Discount_Price, p.Stock_Quantity,
+                         p.Gender, p.Size
+            """
+            products = self.db.execute_query(query, (gender,))
+            
+        elif search_type == '4':
+            season = input("Season (Spring/Summer/Autumn/Winter/All): ")
+            query = """
+                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                       p.Price, p.Discount_Price, p.Stock_Quantity,
+                       p.Season, p.Size,
+                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
+                FROM Product p
+                INNER JOIN Category c ON p.Category_ID = c.Category_ID
+                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
+                WHERE p.Season = ?
+                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                         p.Price, p.Discount_Price, p.Stock_Quantity,
+                         p.Season, p.Size
+            """
+            products = self.db.execute_query(query, (season,))
+            
+        elif search_type == '5':
+            brand = input("Brand name: ")
+            query = """
+                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                       p.Price, p.Discount_Price, p.Stock_Quantity,
+                       p.Colors, p.Size,
+                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
+                FROM Product p
+                INNER JOIN Category c ON p.Category_ID = c.Category_ID
+                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
+                WHERE p.Brand LIKE ?
+                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
+                         p.Price, p.Discount_Price, p.Stock_Quantity,
+                         p.Colors, p.Size
+            """
+            products = self.db.execute_query(query, (f'%{brand}%',))
+        else:
+            print("❌ Invalid choice!")
+            input("\nPress Enter...")
+            return
+        
+        # نمایش نتایج
+        if products:
+            print(f"\n📦 Search Results ({len(products)} found):")
+            print("-" * 100)
+            print(f"{'ID':<4} {'Name':<20} {'Brand':<10} {'Category':<12} {'Price':<10} {'Stock':<6} {'Rating':<6}")
+            print("-" * 100)
+            for p in products:
+                rating = f"{p[-1]:.1f}" if p[-1] > 0 else "-"
+                price = p[5] if p[5] and p[5] > 0 else p[4]
+                brand = p[2] or "-"
+                print(f"{p[0]:<4} {p[1][:19]:<20} {brand[:9]:<10} {p[3][:11]:<12} ${price:<10} {p[6]:<6} {rating:<6}")
+            
+            # امکان مشاهده جزئیات
+            try:
+                view_id = int(input("\nEnter Product ID to view details (0 to skip): "))
+                if view_id > 0:
+                    self.show_product_details(view_id)
+            except ValueError:
+                pass
+        else:
+            print("❌ No products found matching your search!")
         
         input("\nPress Enter...")
     
     # ============================================================
     # SELLER FUNCTIONS (Only for sellers)
     # ============================================================
+    
     def add_product(self):
-        """Add new product (Seller only)"""
+        """Add new product with all attributes (Seller only)"""
         self.clear_screen()
-        print("=" * 50)
+        print("=" * 60)
         print("➕ ADD NEW PRODUCT")
-        print("=" * 50)
+        print("=" * 60)
         
+
         name = input("Product Name: ")
         
         # Show categories
@@ -206,17 +411,61 @@ class OnlineShopApp:
             price = float(input("Price: $"))
             stock = int(input("Stock Quantity: "))
             description = input("Description: ")
+            
+            # =====new details =====
+            print("\n📋 Product Details (press Enter to skip optional fields):")
+            
+            brand = input("Brand: ") or None
+            colors = input("Colors (comma separated, e.g., Black,White,Blue): ") or None
+            size = input("Sizes (comma separated, e.g., S,M,L,XL): ") or None
+            material = input("Material: ") or None
+            
+            weight_input = input("Weight (grams): ")
+            weight = float(weight_input) if weight_input else None
+            
+            gender = input("Gender (Men/Women/Unisex/Kids): ") or None
+            season = input("Season (Spring/Summer/Autumn/Winter/All): ") or None
+            
+            discount_input = input("Discount (%): ")
+            discount = float(discount_input) if discount_input else 0
+            
+            # محاسبه قیمت تخفیفی
+            discount_price = price - (price * discount / 100) if discount > 0 else price
+            
+            is_featured = input("Is Featured? (y/n): ").lower() == 'y'
+            is_new = input("Is New? (y/n): ").lower() == 'y'
+            is_best_seller = input("Is Best Seller? (y/n): ").lower() == 'y'
+            
+            warranty = input("Warranty (e.g., 12 months): ") or None
+            return_policy = input("Return Policy (e.g., 14 days): ") or None
+            
+            image_url = input("Image URL: ") or None
+            video_url = input("Video URL: ") or None
+            
         except ValueError:
             print("❌ Invalid input!")
             input("\nPress Enter...")
             return
         
         query = """
-            INSERT INTO Product (Product_Name, Category_ID, Seller_ID, Price, Stock_Quantity, Created_At, Description)
-            VALUES (?, ?, ?, ?, ?, GETDATE(), ?)
+            INSERT INTO Product (
+                Product_Name, Category_ID, Seller_ID, Price, Stock_Quantity, 
+                Created_At, Description,
+                Brand, Colors, Size, Material, Weight, Gender, Season,
+                Discount, Discount_Price, IsFeatured, IsNew, IsBestSeller,
+                Video_URL, Image_URL, Warranty, Return_Policy
+            )
+            VALUES (?, ?, ?, ?, ?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        if self.db.execute_command(query, (name, category_id, self.current_user[0], price, stock, description)):
+        
+        if self.db.execute_command(query, (
+            name, category_id, self.current_user[0], price, stock, description,
+            brand, colors, size, material, weight, gender, season,
+            discount, discount_price, is_featured, is_new, is_best_seller,
+            video_url, image_url, warranty, return_policy
+        )):
             print("\n✅ Product added successfully!")
+            print(f"   📊 Final Price: ${discount_price:.2f} (after {discount:.0f}% discount)")
         else:
             print("\n❌ Failed to add product!")
         
