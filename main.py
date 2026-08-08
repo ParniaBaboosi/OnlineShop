@@ -1,5 +1,7 @@
 # main.py
 import os
+import random
+import datetime
 from database import Database
 
 class OnlineShopApp:
@@ -35,7 +37,7 @@ class OnlineShopApp:
                 # Customer Menu
                 print("1. 📦 View Products")
                 print("2. 🛒 New Order")
-                print("3. 📋 My Orders")
+                print("3. 📋 My Orders & Transactions")
                 print("4. ⭐ Rate a Product")
                 print("5. 📝 View Product Reviews")
                 print("6. 🔍 Search Product")
@@ -112,7 +114,7 @@ class OnlineShopApp:
     # ============================================================
     
     def show_products(self):
-        """Show all products with full attributes"""
+        """Show all products with full attributes - stay in page after viewing details"""
         self.clear_screen()
         print("=" * 80)
         print("📦 PRODUCT LIST")
@@ -142,33 +144,46 @@ class OnlineShopApp:
         products = self.db.execute_query(query)
         
         if products:
-            print("-" * 130)
-            print(f"{'ID':<4} {'Name':<18} {'Brand':<10} {'Category':<12} {'Price':<10} {'Stock':<6} {'Rating':<6} {'Seller':<10}")
-            print("-" * 130)
-            for p in products:
-                rating = f"{p[19]:.1f}" if p[19] > 0 else "-"
-                brand = p[6] or "-"
-                price = p[3]
-                discount_price = p[13] or price
+            while True:
+                self.clear_screen()
+                print("=" * 80)
+                print("📦 PRODUCT LIST")
+                print("=" * 80)
                 
-                print(f"{p[0]:<4} {p[1][:17]:<18} {brand[:9]:<10} {p[2][:11]:<12} ${discount_price:<10} {p[4]:<6} {rating:<6} {p[5][:9]:<10}")
-            
-            print("\n" + "-" * 130)
-            print("📌 View product details? Enter Product ID (or 0 to skip): ")
-            try:
-                view_id = int(input("Product ID: "))
-                if view_id > 0:
-                    self.show_product_details(view_id)
-            except ValueError:
-                pass
+                print("-" * 130)
+                print(f"{'ID':<4} {'Name':<18} {'Brand':<10} {'Category':<12} {'Price':<10} {'Stock':<6} {'Rating':<6} {'Seller':<10}")
+                print("-" * 130)
+                for p in products:
+                    rating = f"{p[19]:.1f}" if p[19] > 0 else "-"
+                    brand = p[6] or "-"
+                    price = p[3]
+                    discount_price = p[13] or price
+                    
+                    print(f"{p[0]:<4} {p[1][:17]:<18} {brand[:9]:<10} {p[2][:11]:<12} ${discount_price:<10} {p[4]:<6} {rating:<6} {p[5][:9]:<10}")
+                
+                print("\n" + "-" * 130)
+                print("📌 Options:")
+                print("   Enter Product ID to view details")
+                print("   0. Back to main menu")
+                
+                try:
+                    choice = input("\nYour choice: ")
+                    if choice == '0':
+                        break
+                    view_id = int(choice)
+                    if view_id > 0:
+                        self.show_product_details(view_id)
+                        input("\nPress Enter to continue...")
+                except ValueError:
+                    print("❌ Invalid input!")
+                    input("\nPress Enter...")
         else:
             print("❌ No products found!")
-        
-        input("\nPress Enter...")
+            input("\nPress Enter...")
     
     def show_product_details(self, product_id):
-        """Show full details of a specific product"""
         self.clear_screen()
+        """Show full details of a specific product"""
         print("=" * 80)
         print("📦 PRODUCT DETAILS")
         print("=" * 80)
@@ -231,7 +246,6 @@ class OnlineShopApp:
             if p[23]:
                 print(f"🖼️ Image: {p[23]}")
             
-            # نشان دادن وضعیت‌ها
             statuses = []
             if p[15]: statuses.append("⭐ Featured")
             if p[16]: statuses.append("🆕 New")
@@ -355,8 +369,6 @@ class OnlineShopApp:
             print("❌ Invalid choice!")
             input("\nPress Enter...")
             return
-        
-        # نمایش نتایج
         if products:
             print(f"\n📦 Search Results ({len(products)} found):")
             print("-" * 100)
@@ -368,11 +380,11 @@ class OnlineShopApp:
                 brand = p[2] or "-"
                 print(f"{p[0]:<4} {p[1][:19]:<20} {brand[:9]:<10} {p[3][:11]:<12} ${price:<10} {p[6]:<6} {rating:<6}")
             
-            # امکان مشاهده جزئیات
             try:
                 view_id = int(input("\nEnter Product ID to view details (0 to skip): "))
                 if view_id > 0:
                     self.show_product_details(view_id)
+                    input("\nPress Enter to continue...")
             except ValueError:
                 pass
         else:
@@ -660,6 +672,19 @@ class OnlineShopApp:
     # ============================================================
     # CUSTOMER FUNCTIONS (Only for customers)
     # ============================================================
+    
+    def get_product_variants(self, product_id):
+        """Get available variants for a product"""
+        query = """
+            SELECT Colors, Size FROM Product WHERE Product_ID = ?
+        """
+        result = self.db.execute_query(query, (product_id,))
+        if result:
+            colors = result[0][0].split(',') if result[0][0] else []
+            sizes = result[0][1].split(',') if result[0][1] else []
+            return colors, sizes
+        return [], []
+    
     def add_address(self):
         """Add new address for current user"""
         print("\n📌 ADD NEW ADDRESS")
@@ -680,15 +705,16 @@ class OnlineShopApp:
             return False
     
     def create_order(self):
-        """Create new order (Customer only)"""
+        """Create new order with variants selection and payment"""
         self.clear_screen()
-        print("=" * 50)
+        print("=" * 60)
         print("🛒 NEW ORDER")
-        print("=" * 50)
+        print("=" * 60)
         
-        # Show available products
+        # Show available products with variants
         query = """
-            SELECT Product_ID, Product_Name, Price, Stock_Quantity 
+            SELECT Product_ID, Product_Name, Price, Stock_Quantity, 
+                   Colors, Size, Brand
             FROM Product
             WHERE Stock_Quantity > 0
         """
@@ -700,10 +726,16 @@ class OnlineShopApp:
             return
         
         print("\nAvailable Products:")
-        print("-" * 50)
+        print("-" * 80)
+        print(f"{'ID':<4} {'Name':<18} {'Brand':<10} {'Price':<10} {'Stock':<6} {'Colors':<15} {'Sizes':<12}")
+        print("-" * 80)
         for p in products:
-            print(f"{p[0]}. {p[1]} - ${p[2]} (Stock: {p[3]})")
-        print("-" * 50)
+            colors = p[4][:14] if p[4] else "-"
+            sizes = p[5][:11] if p[5] else "-"
+            brand = p[6][:9] if p[6] else "-"
+            print(f"{p[0]:<4} {p[1][:17]:<18} {brand:<10} ${p[2]:<10} {p[3]:<6} {colors:<15} {sizes:<12}")
+        print("-" * 80)
+        print("Enter 0 to finish ordering\n")
         
         # Get user's address
         address_query = "SELECT Address_ID, City, Street FROM Address WHERE User_ID = ?"
@@ -746,15 +778,99 @@ class OnlineShopApp:
             input("\nPress Enter...")
             return
         
-        # Select products
+        # Select products with variants
         items = []
+        total = 0
+        
         while True:
+            print("\n" + "-" * 40)
+            print(f"📦 Add product to order (Total: ${total:.2f})")
+            print("Enter 0 to finish ordering")
+            print("-" * 40)
+            
             try:
                 product_id = int(input("Product ID (0 to finish): "))
                 if product_id == 0:
                     break
-                quantity = int(input("Quantity: "))
-                items.append((product_id, quantity))
+                
+                # Check if product exists
+                product_query = """
+                    SELECT Product_ID, Product_Name, Price, Stock_Quantity, 
+                           Colors, Size, Brand
+                    FROM Product
+                    WHERE Product_ID = ? AND Stock_Quantity > 0
+                """
+                product = self.db.execute_query(product_query, (product_id,))
+                if not product:
+                    print("❌ Invalid product ID or out of stock!")
+                    continue
+                
+                p = product[0]
+                colors = p[4].split(',') if p[4] else []
+                sizes = p[5].split(',') if p[5] else []
+                
+                print(f"\n📝 {p[1]} - ${p[2]}")
+                
+               # choosing colors
+                selected_color = None
+                if colors and len(colors) > 1:
+                    print("\n🎨 Available Colors:")
+                    for i, c in enumerate(colors, 1):
+                        print(f"  {i}. {c.strip()}")
+                    color_choice = input("Choose color (number): ")
+                    try:
+                        idx = int(color_choice) - 1
+                        if 0 <= idx < len(colors):
+                            selected_color = colors[idx].strip()
+                        else:
+                            print("❌ Invalid color!")
+                            continue
+                    except ValueError:
+                        selected_color = colors[0].strip()
+                elif colors:
+                    selected_color = colors[0].strip()
+                    print(f"🎨 Color: {selected_color}")
+                
+                # انتخاب سایز
+                selected_size = None
+                if sizes and len(sizes) > 1:
+                    print("\n📏 Available Sizes:")
+                    for i, s in enumerate(sizes, 1):
+                        print(f"  {i}. {s.strip()}")
+                    size_choice = input("Choose size (number): ")
+                    try:
+                        idx = int(size_choice) - 1
+                        if 0 <= idx < len(sizes):
+                            selected_size = sizes[idx].strip()
+                        else:
+                            print("❌ Invalid size!")
+                            continue
+                    except ValueError:
+                        selected_size = sizes[0].strip()
+                elif sizes:
+                    selected_size = sizes[0].strip()
+                    print(f"📏 Size: {selected_size}")
+                
+                quantity = int(input(f"Quantity (Stock: {p[3]}): "))
+                if quantity <= 0:
+                    print("❌ Quantity must be greater than 0!")
+                    continue
+                if quantity > p[3]:
+                    print(f"❌ Not enough stock! Available: {p[3]}")
+                    continue
+                
+               
+                items.append({
+                    'product_id': p[0],
+                    'name': p[1],
+                    'price': p[2],
+                    'quantity': quantity,
+                    'color': selected_color,
+                    'size': selected_size
+                })
+                total += p[2] * quantity
+                print(f"✅ Added: {p[1]} x{quantity} - ${p[2] * quantity:.2f}")
+                
             except ValueError:
                 print("❌ Invalid input!")
         
@@ -763,7 +879,56 @@ class OnlineShopApp:
             input("\nPress Enter...")
             return
         
-        # Create order
+        # ============================================================
+        # 💳 PAYMENT SELECTION
+        # ============================================================
+        print("\n" + "=" * 50)
+        print("💳 SELECT PAYMENT METHOD")
+        print("=" * 50)
+        print("1. 💳 Credit Card (Online Payment)")
+        print("2. 🏦 Debit Card (Online Payment)")
+        print("3. 💵 Cash on Delivery")
+        print("4. 📱 Online Payment (Wallet)")
+        print("5. 🪙 Crypto Currency")
+        print("-" * 50)
+        
+        method_choice = input("Choose payment method (1-5): ")
+        method_map = {
+            '1': ('credit_card', 'Credit Card'),
+            '2': ('debit_card', 'Debit Card'),
+            '3': ('cash_on_delivery', 'Cash on Delivery'),
+            '4': ('online_payment', 'Digital Wallet'),
+            '5': ('crypto', 'Crypto Currency')
+        }
+        
+        if method_choice not in method_map:
+            print("❌ Invalid payment method!")
+            input("\nPress Enter...")
+            return
+        
+        payment_method, method_display = method_map[method_choice]
+        
+        # ============================================================
+        # ⏳ SIMULATE PAYMENT
+        # ============================================================
+        print("\n" + "=" * 50)
+        print("⏳ Processing payment...")
+        print(f"💳 Method: {method_display}")
+        print("-" * 50)
+        
+        is_successful = random.random() < 0.95
+        
+        if is_successful:
+            print("✅ Payment Successful!")
+            status = 'success'
+        else:
+            print("❌ Payment Failed!")
+            print("💡 Please try again or use another method.")
+            status = 'failed'
+        
+        # ============================================================
+        # 📝 CREATE ORDER
+        # ============================================================
         try:
             # Insert order
             order_query = """
@@ -772,56 +937,85 @@ class OnlineShopApp:
             """
             self.db.execute_command(order_query, (self.current_user[0], address_id))
             
-            # Get Order ID
             order_id_query = "SELECT MAX(Order_ID) FROM [Order]"
             result = self.db.execute_query(order_id_query)
+            order_id = result[0][0] if result else None
             
-            if result and result[0][0]:
-                order_id = result[0][0]
-            else:
-                raise Exception("Failed to get Order ID!")
+            if not order_id:
+                raise Exception("Failed to create order!")
             
-            print(f"📝 Order #{order_id} created...")
-            
-            total = 0
-            for product_id, quantity in items:
-                price_query = "SELECT Price, Stock_Quantity FROM Product WHERE Product_ID = ?"
-                price_result = self.db.execute_query(price_query, (product_id,))
-                if not price_result:
-                    print(f"⚠️ Product {product_id} not found!")
-                    continue
-                
-                price = price_result[0][0]
-                stock = price_result[0][1]
-                
-                if stock < quantity:
-                    print(f"⚠️ Not enough stock for product {product_id}! Available: {stock}")
-                    continue
-                
+            # Insert order items with variant info
+            for item in items:
                 item_query = """
                     INSERT INTO Order_Item (Order_ID, Product_ID, Quantity, Price)
                     VALUES (?, ?, ?, ?)
                 """
-                self.db.execute_command(item_query, (order_id, product_id, quantity, price))
-                total += price * quantity
+                self.db.execute_command(item_query, (
+                    order_id, item['product_id'], item['quantity'], item['price']
+                ))
                 
-                # Update stock
                 update_stock = "UPDATE Product SET Stock_Quantity = Stock_Quantity - ? WHERE Product_ID = ?"
-                self.db.execute_command(update_stock, (quantity, product_id))
+                self.db.execute_command(update_stock, (item['quantity'], item['product_id']))
             
-            # Update total amount
             update_total = "UPDATE [Order] SET Total_Amount = ? WHERE Order_ID = ?"
             self.db.execute_command(update_total, (total, order_id))
             
             # Insert payment
-            payment_query = """
-                INSERT INTO Payment (Order_ID, Payment_Date, Amount, Payment_Method, Payment_Status)
-                VALUES (?, GETDATE(), ?, 'online', 'success')
-            """
-            self.db.execute_command(payment_query, (order_id, total))
+            transaction_id = f"TXN-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000, 9999)}"
+            tracking_code = f"TRK-{order_id}-{random.randint(10000, 99999)}"
             
-            print(f"\n✅ Order #{order_id} created successfully!")
-            print(f"💰 Total Amount: ${total}")
+            payment_query = """
+                INSERT INTO Payment (
+                    Order_ID, Payment_Date, Amount, Payment_Method, Payment_Status,
+                    Transaction_ID, Tracking_Code, Approved_Date, Payment_Note
+                )
+                VALUES (?, GETDATE(), ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            approved_date = datetime.date.today() if status == 'success' else None
+            note = f"Order #{order_id} - {method_display}"
+            
+            self.db.execute_command(payment_query, (
+                order_id,
+                total,
+                payment_method,
+                status,
+                transaction_id,
+                tracking_code,
+                approved_date,
+                note
+            ))
+            
+            # ============================================================
+            # 📋 SHOW ORDER SUMMARY
+            # ============================================================
+            print("\n" + "=" * 50)
+            print("📋 ORDER SUMMARY")
+            print("=" * 50)
+            print(f"🆔 Order ID: {order_id}")
+            print(f"📅 Date: {datetime.date.today()}")
+            print(f"💰 Total: ${total}")
+            print(f"💳 Payment: {method_display}")
+            print(f"📊 Status: {'✅ Success' if status == 'success' else '❌ Failed'}")
+            print(f"🔢 Transaction ID: {transaction_id}")
+            print(f"📌 Tracking Code: {tracking_code}")
+            
+            print("\n📦 Items:")
+            for item in items:
+                variant_info = ""
+                if item.get('color'):
+                    variant_info += f" Color: {item['color']}"
+                if item.get('size'):
+                    variant_info += f" Size: {item['size']}"
+                print(f"   - {item['name']} x{item['quantity']} - ${item['price'] * item['quantity']:.2f}{variant_info}")
+            
+            if status == 'success':
+                print("\n✅ Your order has been placed successfully!")
+                print("📧 A confirmation email will be sent to you.")
+            else:
+                print("\n❌ Payment failed. Please try again.")
+            
+            print("=" * 50)
             
         except Exception as e:
             print(f"❌ Error creating order: {e}")
@@ -829,31 +1023,48 @@ class OnlineShopApp:
         input("\nPress Enter...")
     
     def show_my_orders(self):
-        """Show current user's orders (Customer only)"""
+        """Show current user's orders with payment details (merged view)"""
         self.clear_screen()
-        print("=" * 50)
-        print("📋 MY ORDERS")
-        print("=" * 50)
+        print("=" * 80)
+        print("📋 MY ORDERS & TRANSACTIONS")
+        print("=" * 80)
         
         query = """
             SELECT o.Order_ID, o.Order_Date, o.Total_Amount, 
-                   COUNT(oi.Order_Item_ID) AS Item_Count
+                   COUNT(oi.Order_Item_ID) AS Item_Count,
+                   p.Payment_Method, p.Payment_Status, p.Transaction_ID,
+                   p.Tracking_Code, p.Approved_Date, p.Amount
             FROM [Order] o
             LEFT JOIN Order_Item oi ON o.Order_ID = oi.Order_ID
+            LEFT JOIN Payment p ON o.Order_ID = p.Order_ID
             WHERE o.User_ID = ?
-            GROUP BY o.Order_ID, o.Order_Date, o.Total_Amount
+            GROUP BY o.Order_ID, o.Order_Date, o.Total_Amount,
+                     p.Payment_Method, p.Payment_Status, p.Transaction_ID,
+                     p.Tracking_Code, p.Approved_Date, p.Amount
             ORDER BY o.Order_Date DESC
         """
         orders = self.db.execute_query(query, (self.current_user[0],))
         
         if orders:
             for o in orders:
-                print(f"\n🆔 Order: {o[0]}")
-                print(f"   📅 Date: {o[1]}")
-                print(f"   💰 Total: ${o[2]}")
-                print(f"   📦 Items: {o[3]}")
-                print("-" * 30)
+                status_icon = "✅" if o[5] == 'success' else "⏳" if o[5] == 'pending' else "❌"
+                method_display = o[4].replace('_', ' ').title() if o[4] else '-'
                 
+                print(f"\n{'='*70}")
+                print(f"🆔 ORDER #{o[0]}")
+                print(f"📅 Date: {o[1]}")
+                print(f"💰 Total: ${o[2]}")
+                print(f"📦 Items: {o[3]}")
+                print("-" * 70)
+                print(f"💳 Payment: {method_display}")
+                print(f"📊 Status: {status_icon} {o[5]}")
+                print(f"🔢 Transaction ID: {o[6] or 'N/A'}")
+                print(f"📌 Tracking Code: {o[7] or 'N/A'}")
+                if o[8]:
+                    print(f"✅ Approved: {o[8]}")
+                print("=" * 70)
+                
+                # نمایش جزئیات سفارش
                 detail_query = """
                     SELECT p.Product_Name, oi.Quantity, oi.Price
                     FROM Order_Item oi
@@ -862,9 +1073,9 @@ class OnlineShopApp:
                 """
                 details = self.db.execute_query(detail_query, (o[0],))
                 if details:
-                    print("   Details:")
+                    print("📦 Items:")
                     for d in details:
-                        print(f"     - {d[0]} (Qty: {d[1]}, Price: ${d[2]})")
+                        print(f"   - {d[0]} x{d[1]} = ${d[2] * d[1]:.2f}")
         else:
             print("❌ You have no orders!")
         
