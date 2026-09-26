@@ -3,28 +3,30 @@ import os
 import random
 import datetime
 from database import Database
+from services import UserService, ProductService, OrderService, PaymentService, ReviewService
 
 class OnlineShopApp:
     def __init__(self):
         self.db = Database()
         self.current_user = None
+        self.user_service = UserService(self.db)
+        self.product_service = ProductService(self.db)
+        self.order_service = OrderService(self.db)
+        self.payment_service = PaymentService(self.db)
+        self.review_service = ReviewService(self.db)
     
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
     
-    # ============================================================
-    # DISPLAY MENU
-    # ============================================================
     def display_main_menu(self):
         self.clear_screen()
         print("=" * 50)
         print("🛍️  ONLINE SHOP")
         print("=" * 50)
         if self.current_user:
-            print(f"👤 User: {self.current_user[1]} ({self.current_user[2]})")
+            print(f"👤 User: {self.current_user['name']} ({self.current_user['type']})")
             print("-" * 50)
-            if self.current_user[2] == 'seller':
-                # Seller Menu
+            if self.current_user['type'] == 'seller':
                 print("1. 📦 View Products")
                 print("2. ➕ Add New Product")
                 print("3. ✏️ Edit Product")
@@ -34,7 +36,6 @@ class OnlineShopApp:
                 print("7. 🔍 Search Product")
                 print("8. 🚪 Logout")
             else:
-                # Customer Menu
                 print("1. 📦 View Products")
                 print("2. 🛒 New Order")
                 print("3. 📋 My Orders & Transactions")
@@ -48,11 +49,7 @@ class OnlineShopApp:
         print("0. ❌ Exit")
         print("=" * 50)
     
-    # ============================================================
-    # REGISTER & LOGIN
-    # ============================================================
     def register(self):
-        """Register new user"""
         self.clear_screen()
         print("=" * 50)
         print("📝 REGISTRATION FORM")
@@ -68,28 +65,11 @@ class OnlineShopApp:
         user_type_choice = input("Choose (1 or 2): ")
         user_type = 'customer' if user_type_choice == '1' else 'seller'
         
-        # Check if email already exists
-        check_query = "SELECT COUNT(*) FROM [User] WHERE Email = ?"
-        result = self.db.execute_query(check_query, (email,))
-        if result and result[0][0] > 0:
-            print("\n❌ This email is already registered!")
-            input("\nPress Enter...")
-            return
-        
-        query = """
-            INSERT INTO [User] (Name, Email, Password, User_Type, Created_At)
-            VALUES (?, ?, ?, ?, GETDATE())
-        """
-        if self.db.execute_command(query, (name, email, password, user_type)):
-            print("\n✅ Registration successful!")
-            print("🔑 You can now login.")
-        else:
-            print("\n❌ Registration failed!")
-        
+        success, msg = self.user_service.register(name, email, password, user_type)
+        print(f"\n{'✅' if success else '❌'} {msg}")
         input("\nPress Enter...")
     
     def login(self):
-        """Login to system"""
         self.clear_screen()
         print("=" * 50)
         print("🔑 LOGIN FORM")
@@ -98,50 +78,22 @@ class OnlineShopApp:
         email = input("Email: ")
         password = input("Password: ")
         
-        query = "SELECT User_ID, Name, User_Type FROM [User] WHERE Email = ? AND Password = ?"
-        result = self.db.execute_query(query, (email, password))
-        
-        if result:
-            self.current_user = result[0]
-            print(f"\n✅ Welcome {self.current_user[1]}!")
+        user = self.user_service.login(email, password)
+        if user:
+            self.current_user = user
+            print(f"\n✅ Welcome {user['name']}!")
         else:
             print("\n❌ Invalid email or password!")
         
         input("\nPress Enter...")
     
-    # ============================================================
-    # COMMON FUNCTIONS (For all users)
-    # ============================================================
-    
     def show_products(self):
-        """Show all products with full attributes - stay in page after viewing details"""
         self.clear_screen()
         print("=" * 80)
         print("📦 PRODUCT LIST")
         print("=" * 80)
         
-        query = """
-            SELECT p.Product_ID, p.Product_Name, c.Category_Name, 
-                   p.Price, p.Stock_Quantity, u.Name AS Seller,
-                   p.Brand, p.Colors, p.Size, p.Material,
-                   p.Gender, p.Season, p.Discount, p.Discount_Price,
-                   p.IsFeatured, p.IsNew, p.IsBestSeller,
-                   p.Warranty, p.Return_Policy,
-                   ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating,
-                   COUNT(r.Review_ID) AS Review_Count
-            FROM Product p
-            INNER JOIN Category c ON p.Category_ID = c.Category_ID
-            INNER JOIN [User] u ON p.Seller_ID = u.User_ID
-            LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-            GROUP BY p.Product_ID, p.Product_Name, c.Category_Name, 
-                     p.Price, p.Stock_Quantity, u.Name,
-                     p.Brand, p.Colors, p.Size, p.Material,
-                     p.Gender, p.Season, p.Discount, p.Discount_Price,
-                     p.IsFeatured, p.IsNew, p.IsBestSeller,
-                     p.Warranty, p.Return_Policy
-            ORDER BY p.Product_ID
-        """
-        products = self.db.execute_query(query)
+        products = self.product_service.get_all()
         
         if products:
             while True:
@@ -156,8 +108,7 @@ class OnlineShopApp:
                 for p in products:
                     rating = f"{p[19]:.1f}" if p[19] > 0 else "-"
                     brand = p[6] or "-"
-                    price = p[3]
-                    discount_price = p[13] or price
+                    discount_price = p[13] or p[3]
                     
                     print(f"{p[0]:<4} {p[1][:17]:<18} {brand[:9]:<10} {p[2][:11]:<12} ${discount_price:<10} {p[4]:<6} {rating:<6} {p[5][:9]:<10}")
                 
@@ -182,40 +133,11 @@ class OnlineShopApp:
             input("\nPress Enter...")
     
     def show_product_details(self, product_id):
-        self.clear_screen()
-        """Show full details of a specific product"""
         print("=" * 80)
         print("📦 PRODUCT DETAILS")
         print("=" * 80)
         
-        query = """
-            SELECT p.Product_ID, p.Product_Name, c.Category_Name, 
-                   p.Price, p.Stock_Quantity, u.Name AS Seller,
-                   p.Brand, p.Colors, p.Size, p.Material,
-                   p.Weight, p.Gender, p.Season, 
-                   p.Discount, p.Discount_Price,
-                   p.IsFeatured, p.IsNew, p.IsBestSeller,
-                   p.Views, p.Sales_Count,
-                   p.Warranty, p.Return_Policy,
-                   p.Video_URL, p.Image_URL,
-                   ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating,
-                   COUNT(r.Review_ID) AS Review_Count
-            FROM Product p
-            INNER JOIN Category c ON p.Category_ID = c.Category_ID
-            INNER JOIN [User] u ON p.Seller_ID = u.User_ID
-            LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-            WHERE p.Product_ID = ?
-            GROUP BY p.Product_ID, p.Product_Name, c.Category_Name, 
-                     p.Price, p.Stock_Quantity, u.Name,
-                     p.Brand, p.Colors, p.Size, p.Material,
-                     p.Weight, p.Gender, p.Season, 
-                     p.Discount, p.Discount_Price,
-                     p.IsFeatured, p.IsNew, p.IsBestSeller,
-                     p.Views, p.Sales_Count,
-                     p.Warranty, p.Return_Policy,
-                     p.Video_URL, p.Image_URL
-        """
-        result = self.db.execute_query(query, (product_id,))
+        result = self.product_service.get_by_id(product_id)
         
         if result:
             p = result[0]
@@ -258,7 +180,6 @@ class OnlineShopApp:
         print("-" * 80)
     
     def search_product(self):
-        """Search products by any attribute (name, brand, color, size, material, etc.)"""
         self.clear_screen()
         print("=" * 80)
         print("🔍 SEARCH PRODUCT")
@@ -272,103 +193,10 @@ class OnlineShopApp:
         print("  5. Brand")
         
         search_type = input("\nChoose search type (1-5): ")
+        keyword = input("Enter search keyword: ")
         
-        if search_type == '1':
-            keyword = input("Enter search keyword: ")
-            query = """
-                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                       p.Price, p.Discount_Price, p.Stock_Quantity,
-                       p.Colors, p.Size, p.Material,
-                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
-                FROM Product p
-                INNER JOIN Category c ON p.Category_ID = c.Category_ID
-                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-                WHERE p.Product_Name LIKE ? OR p.Brand LIKE ? OR p.Colors LIKE ? 
-                   OR p.Material LIKE ? OR p.Description LIKE ?
-                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                         p.Price, p.Discount_Price, p.Stock_Quantity,
-                         p.Colors, p.Size, p.Material
-            """
-            params = (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', f'%{keyword}%')
-            products = self.db.execute_query(query, params)
-            
-        elif search_type == '2':
-            try:
-                min_price = float(input("Min price: $") or 0)
-                max_price = float(input("Max price: $") or 999999)
-                query = """
-                    SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                           p.Price, p.Discount_Price, p.Stock_Quantity,
-                           p.Colors, p.Size,
-                           ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
-                    FROM Product p
-                    INNER JOIN Category c ON p.Category_ID = c.Category_ID
-                    LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-                    WHERE p.Price BETWEEN ? AND ?
-                    GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                             p.Price, p.Discount_Price, p.Stock_Quantity,
-                             p.Colors, p.Size
-                """
-                products = self.db.execute_query(query, (min_price, max_price))
-            except ValueError:
-                print("❌ Invalid price!")
-                input("\nPress Enter...")
-                return
-            
-        elif search_type == '3':
-            gender = input("Gender (Men/Women/Unisex/Kids): ")
-            query = """
-                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                       p.Price, p.Discount_Price, p.Stock_Quantity,
-                       p.Gender, p.Size,
-                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
-                FROM Product p
-                INNER JOIN Category c ON p.Category_ID = c.Category_ID
-                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-                WHERE p.Gender = ?
-                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                         p.Price, p.Discount_Price, p.Stock_Quantity,
-                         p.Gender, p.Size
-            """
-            products = self.db.execute_query(query, (gender,))
-            
-        elif search_type == '4':
-            season = input("Season (Spring/Summer/Autumn/Winter/All): ")
-            query = """
-                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                       p.Price, p.Discount_Price, p.Stock_Quantity,
-                       p.Season, p.Size,
-                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
-                FROM Product p
-                INNER JOIN Category c ON p.Category_ID = c.Category_ID
-                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-                WHERE p.Season = ?
-                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                         p.Price, p.Discount_Price, p.Stock_Quantity,
-                         p.Season, p.Size
-            """
-            products = self.db.execute_query(query, (season,))
-            
-        elif search_type == '5':
-            brand = input("Brand name: ")
-            query = """
-                SELECT p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                       p.Price, p.Discount_Price, p.Stock_Quantity,
-                       p.Colors, p.Size,
-                       ISNULL(AVG(CAST(r.Rating AS FLOAT)), 0) AS Avg_Rating
-                FROM Product p
-                INNER JOIN Category c ON p.Category_ID = c.Category_ID
-                LEFT JOIN Review r ON p.Product_ID = r.Product_ID
-                WHERE p.Brand LIKE ?
-                GROUP BY p.Product_ID, p.Product_Name, p.Brand, c.Category_Name,
-                         p.Price, p.Discount_Price, p.Stock_Quantity,
-                         p.Colors, p.Size
-            """
-            products = self.db.execute_query(query, (f'%{brand}%',))
-        else:
-            print("❌ Invalid choice!")
-            input("\nPress Enter...")
-            return
+        products = self.product_service.search(keyword)
+        
         if products:
             print(f"\n📦 Search Results ({len(products)} found):")
             print("-" * 100)
@@ -393,22 +221,18 @@ class OnlineShopApp:
         input("\nPress Enter...")
     
     # ============================================================
-    # SELLER FUNCTIONS (Only for sellers)
+    # SELLER FUNCTIONS
     # ============================================================
     
     def add_product(self):
-        """Add new product with all attributes (Seller only)"""
         self.clear_screen()
         print("=" * 60)
         print("➕ ADD NEW PRODUCT")
         print("=" * 60)
         
-
         name = input("Product Name: ")
         
-        # Show categories
-        cat_query = "SELECT Category_ID, Category_Name FROM Category"
-        categories = self.db.execute_query(cat_query)
+        categories = self.product_service.get_categories()
         if categories:
             print("\n📂 Categories:")
             for c in categories:
@@ -424,33 +248,22 @@ class OnlineShopApp:
             stock = int(input("Stock Quantity: "))
             description = input("Description: ")
             
-            # =====new details =====
             print("\n📋 Product Details (press Enter to skip optional fields):")
-            
             brand = input("Brand: ") or None
-            colors = input("Colors (comma separated, e.g., Black,White,Blue): ") or None
-            size = input("Sizes (comma separated, e.g., S,M,L,XL): ") or None
+            colors = input("Colors (comma separated): ") or None
+            size = input("Sizes (comma separated): ") or None
             material = input("Material: ") or None
-            
             weight_input = input("Weight (grams): ")
             weight = float(weight_input) if weight_input else None
-            
             gender = input("Gender (Men/Women/Unisex/Kids): ") or None
-            season = input("Season (Spring/Summer/Autumn/Winter/All): ") or None
-            
+            season = input("Season: ") or None
             discount_input = input("Discount (%): ")
             discount = float(discount_input) if discount_input else 0
-            
-            # محاسبه قیمت تخفیفی
-            discount_price = price - (price * discount / 100) if discount > 0 else price
-            
             is_featured = input("Is Featured? (y/n): ").lower() == 'y'
             is_new = input("Is New? (y/n): ").lower() == 'y'
             is_best_seller = input("Is Best Seller? (y/n): ").lower() == 'y'
-            
-            warranty = input("Warranty (e.g., 12 months): ") or None
-            return_policy = input("Return Policy (e.g., 14 days): ") or None
-            
+            warranty = input("Warranty: ") or None
+            return_policy = input("Return Policy: ") or None
             image_url = input("Image URL: ") or None
             video_url = input("Video URL: ") or None
             
@@ -459,44 +272,27 @@ class OnlineShopApp:
             input("\nPress Enter...")
             return
         
-        query = """
-            INSERT INTO Product (
-                Product_Name, Category_ID, Seller_ID, Price, Stock_Quantity, 
-                Created_At, Description,
-                Brand, Colors, Size, Material, Weight, Gender, Season,
-                Discount, Discount_Price, IsFeatured, IsNew, IsBestSeller,
-                Video_URL, Image_URL, Warranty, Return_Policy
-            )
-            VALUES (?, ?, ?, ?, ?, GETDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        
-        if self.db.execute_command(query, (
-            name, category_id, self.current_user[0], price, stock, description,
+        if self.product_service.add(
+            self.current_user['id'], name, category_id, price, stock, description,
             brand, colors, size, material, weight, gender, season,
-            discount, discount_price, is_featured, is_new, is_best_seller,
-            video_url, image_url, warranty, return_policy
-        )):
+            discount, is_featured, is_new, is_best_seller,
+            warranty, return_policy, image_url, video_url
+        ):
+            discount_price = price - (price * discount / 100) if discount > 0 else price
             print("\n✅ Product added successfully!")
-            print(f"   📊 Final Price: ${discount_price:.2f} (after {discount:.0f}% discount)")
+            print(f"   📊 Final Price: ${discount_price:.2f}")
         else:
             print("\n❌ Failed to add product!")
         
         input("\nPress Enter...")
     
     def edit_product(self):
-        """Edit existing product (Seller only)"""
         self.clear_screen()
         print("=" * 50)
         print("✏️ EDIT PRODUCT")
         print("=" * 50)
         
-        # Show only seller's products
-        query = """
-            SELECT Product_ID, Product_Name, Price, Stock_Quantity 
-            FROM Product
-            WHERE Seller_ID = ?
-        """
-        products = self.db.execute_query(query, (self.current_user[0],))
+        products = self.product_service.get_seller_products(self.current_user['id'])
         
         if not products:
             print("❌ You have no products to edit!")
@@ -509,55 +305,38 @@ class OnlineShopApp:
         
         try:
             product_id = int(input("\nSelect Product ID to edit: "))
-            
-            # Check if product belongs to seller
-            check_query = "SELECT * FROM Product WHERE Product_ID = ? AND Seller_ID = ?"
-            result = self.db.execute_query(check_query, (product_id, self.current_user[0]))
-            if not result:
+            current = self.product_service.get_by_id(product_id)
+            if not current:
                 print("❌ You don't own this product!")
                 input("\nPress Enter...")
                 return
             
-            current = result[0]
-            print(f"\nCurrent: Name={current[1]}, Price=${current[4]}, Stock={current[5]}")
+            current = current[0]
+            print(f"\nCurrent: Name={current[1]}, Price=${current[3]}, Stock={current[4]}")
             print("\nLeave blank to keep current value.")
             
             new_name = input(f"New Name (current: {current[1]}): ") or current[1]
+            new_price_input = input(f"New Price (current: {current[3]}): ")
+            new_price = float(new_price_input) if new_price_input else current[3]
+            new_stock_input = input(f"New Stock (current: {current[4]}): ")
+            new_stock = int(new_stock_input) if new_stock_input else current[4]
             
-            new_price_input = input(f"New Price (current: {current[4]}): ")
-            new_price = float(new_price_input) if new_price_input else current[4]
-            
-            new_stock_input = input(f"New Stock (current: {current[5]}): ")
-            new_stock = int(new_stock_input) if new_stock_input else current[5]
-            
-            update_query = "UPDATE Product SET Product_Name = ?, Price = ?, Stock_Quantity = ? WHERE Product_ID = ? AND Seller_ID = ?"
-            params = (new_name, new_price, new_stock, product_id, self.current_user[0])
-            
-            if self.db.execute_command(update_query, params):
+            if self.product_service.update(product_id, self.current_user['id'], new_name, new_price, new_stock):
                 print("\n✅ Product updated successfully!")
             else:
                 print("\n❌ Failed to update product!")
-                
-        except ValueError as e:
-            print(f"❌ Invalid input: {e}")
+        except ValueError:
+            print("❌ Invalid input!")
         
         input("\nPress Enter...")
     
     def update_stock(self):
-        """Update stock quantity only (Seller only)"""
         self.clear_screen()
         print("=" * 50)
         print("📦 UPDATE STOCK")
         print("=" * 50)
         
-        # Show seller's products
-        query = """
-            SELECT Product_ID, Product_Name, Stock_Quantity 
-            FROM Product
-            WHERE Seller_ID = ?
-        """
-        products = self.db.execute_query(query, (self.current_user[0],))
-        
+        products = self.product_service.get_seller_products(self.current_user['id'])
         if not products:
             print("❌ You have no products!")
             input("\nPress Enter...")
@@ -570,44 +349,30 @@ class OnlineShopApp:
         try:
             product_id = int(input("\nSelect Product ID: "))
             new_stock = int(input("New Stock Quantity: "))
-            
             if new_stock < 0:
                 print("❌ Stock cannot be negative!")
                 input("\nPress Enter...")
                 return
             
-            update_query = "UPDATE Product SET Stock_Quantity = ? WHERE Product_ID = ? AND Seller_ID = ?"
-            if self.db.execute_command(update_query, (new_stock, product_id, self.current_user[0])):
+            if self.product_service.update_stock(product_id, self.current_user['id'], new_stock):
                 print("\n✅ Stock updated successfully!")
             else:
                 print("\n❌ Failed to update stock!")
-                
         except ValueError:
             print("❌ Invalid input!")
         
         input("\nPress Enter...")
     
     def show_low_stock(self):
-        """Show products with low stock (Seller only)"""
         self.clear_screen()
         print("=" * 50)
         print("⚠️ LOW STOCK ALERT")
         print("=" * 50)
         
         threshold_input = input("Enter stock threshold (default: 10): ")
-        try:
-            threshold = int(threshold_input) if threshold_input else 10
-        except ValueError:
-            threshold = 10
+        threshold = int(threshold_input) if threshold_input else 10
         
-        query = """
-            SELECT Product_ID, Product_Name, Stock_Quantity
-            FROM Product
-            WHERE Seller_ID = ? AND Stock_Quantity <= ?
-            ORDER BY Stock_Quantity ASC
-        """
-        products = self.db.execute_query(query, (self.current_user[0], threshold))
-        
+        products = self.product_service.get_low_stock(self.current_user['id'], threshold)
         if products:
             print(f"\n📦 Products with stock <= {threshold}:")
             print("-" * 40)
@@ -620,20 +385,12 @@ class OnlineShopApp:
         input("\nPress Enter...")
     
     def delete_product(self):
-        """Delete product (Seller only)"""
         self.clear_screen()
         print("=" * 50)
         print("🗑️ DELETE PRODUCT")
         print("=" * 50)
         
-        # Show only seller's products
-        query = """
-            SELECT Product_ID, Product_Name, Price, Stock_Quantity 
-            FROM Product
-            WHERE Seller_ID = ?
-        """
-        products = self.db.execute_query(query, (self.current_user[0],))
-        
+        products = self.product_service.get_seller_products(self.current_user['id'])
         if not products:
             print("❌ You have no products to delete!")
             input("\nPress Enter...")
@@ -645,59 +402,31 @@ class OnlineShopApp:
         
         try:
             product_id = int(input("\nSelect Product ID to delete: "))
-            
-            # Check if product belongs to seller
-            check_query = "SELECT COUNT(*) FROM Product WHERE Product_ID = ? AND Seller_ID = ?"
-            result = self.db.execute_query(check_query, (product_id, self.current_user[0]))
-            if not result or result[0][0] == 0:
-                print("❌ You don't own this product!")
-                input("\nPress Enter...")
-                return
-            
             confirm = input(f"⚠️ Are you sure you want to delete product {product_id}? (y/n): ")
             if confirm.lower() == 'y':
-                delete_query = "DELETE FROM Product WHERE Product_ID = ? AND Seller_ID = ?"
-                if self.db.execute_command(delete_query, (product_id, self.current_user[0])):
+                if self.product_service.delete(product_id, self.current_user['id']):
                     print("\n✅ Product deleted successfully!")
                 else:
                     print("\n❌ Failed to delete product!")
             else:
                 print("\n❌ Deletion cancelled.")
-                
         except ValueError:
             print("❌ Invalid input!")
         
         input("\nPress Enter...")
     
     # ============================================================
-    # CUSTOMER FUNCTIONS (Only for customers)
+    # CUSTOMER FUNCTIONS
     # ============================================================
     
-    def get_product_variants(self, product_id):
-        """Get available variants for a product"""
-        query = """
-            SELECT Colors, Size FROM Product WHERE Product_ID = ?
-        """
-        result = self.db.execute_query(query, (product_id,))
-        if result:
-            colors = result[0][0].split(',') if result[0][0] else []
-            sizes = result[0][1].split(',') if result[0][1] else []
-            return colors, sizes
-        return [], []
-    
     def add_address(self):
-        """Add new address for current user"""
         print("\n📌 ADD NEW ADDRESS")
         state = input("State: ")
         city = input("City: ")
         street = input("Street: ")
         postal_code = input("Postal Code: ")
         
-        query = """
-            INSERT INTO Address (User_ID, State, City, Street, Postal_Code)
-            VALUES (?, ?, ?, ?, ?)
-        """
-        if self.db.execute_command(query, (self.current_user[0], state, city, street, postal_code)):
+        if self.order_service.add_address(self.current_user['id'], state, city, street, postal_code):
             print("✅ Address added successfully!")
             return True
         else:
@@ -705,20 +434,12 @@ class OnlineShopApp:
             return False
     
     def create_order(self):
-        """Create new order with variants selection and payment"""
         self.clear_screen()
         print("=" * 60)
         print("🛒 NEW ORDER")
         print("=" * 60)
         
-        # Show available products with variants
-        query = """
-            SELECT Product_ID, Product_Name, Price, Stock_Quantity, 
-                   Colors, Size, Brand
-            FROM Product
-            WHERE Stock_Quantity > 0
-        """
-        products = self.db.execute_query(query)
+        products = self.order_service.get_available_products()
         
         if not products:
             print("❌ No products available for purchase!")
@@ -737,9 +458,7 @@ class OnlineShopApp:
         print("-" * 80)
         print("Enter 0 to finish ordering\n")
         
-        # Get user's address
-        address_query = "SELECT Address_ID, City, Street FROM Address WHERE User_ID = ?"
-        addresses = self.db.execute_query(address_query, (self.current_user[0],))
+        addresses = self.order_service.get_addresses(self.current_user['id'])
         
         if not addresses:
             print("\n⚠️ You have no address registered!")
@@ -748,7 +467,7 @@ class OnlineShopApp:
                 if not self.add_address():
                     input("\nPress Enter...")
                     return
-                addresses = self.db.execute_query(address_query, (self.current_user[0],))
+                addresses = self.order_service.get_addresses(self.current_user['id'])
                 if not addresses:
                     print("❌ Failed to add address!")
                     input("\nPress Enter...")
@@ -778,7 +497,6 @@ class OnlineShopApp:
             input("\nPress Enter...")
             return
         
-        # Select products with variants
         items = []
         total = 0
         
@@ -793,25 +511,16 @@ class OnlineShopApp:
                 if product_id == 0:
                     break
                 
-                # Check if product exists
-                product_query = """
-                    SELECT Product_ID, Product_Name, Price, Stock_Quantity, 
-                           Colors, Size, Brand
-                    FROM Product
-                    WHERE Product_ID = ? AND Stock_Quantity > 0
-                """
-                product = self.db.execute_query(product_query, (product_id,))
+                product = self.product_service.get_by_id(product_id)
                 if not product:
                     print("❌ Invalid product ID or out of stock!")
                     continue
                 
                 p = product[0]
-                colors = p[4].split(',') if p[4] else []
-                sizes = p[5].split(',') if p[5] else []
+                colors, sizes = self.product_service.get_variants(product_id)
                 
-                print(f"\n📝 {p[1]} - ${p[2]}")
+                print(f"\n📝 {p[1]} - ${p[3]}")
                 
-               # choosing colors
                 selected_color = None
                 if colors and len(colors) > 1:
                     print("\n🎨 Available Colors:")
@@ -831,7 +540,6 @@ class OnlineShopApp:
                     selected_color = colors[0].strip()
                     print(f"🎨 Color: {selected_color}")
                 
-                # انتخاب سایز
                 selected_size = None
                 if sizes and len(sizes) > 1:
                     print("\n📏 Available Sizes:")
@@ -851,25 +559,24 @@ class OnlineShopApp:
                     selected_size = sizes[0].strip()
                     print(f"📏 Size: {selected_size}")
                 
-                quantity = int(input(f"Quantity (Stock: {p[3]}): "))
+                quantity = int(input(f"Quantity (Stock: {p[4]}): "))
                 if quantity <= 0:
                     print("❌ Quantity must be greater than 0!")
                     continue
-                if quantity > p[3]:
-                    print(f"❌ Not enough stock! Available: {p[3]}")
+                if quantity > p[4]:
+                    print(f"❌ Not enough stock! Available: {p[4]}")
                     continue
                 
-               
                 items.append({
                     'product_id': p[0],
                     'name': p[1],
-                    'price': p[2],
+                    'price': p[3],
                     'quantity': quantity,
                     'color': selected_color,
                     'size': selected_size
                 })
-                total += p[2] * quantity
-                print(f"✅ Added: {p[1]} x{quantity} - ${p[2] * quantity:.2f}")
+                total += p[3] * quantity
+                print(f"✅ Added: {p[1]} x{quantity} - ${p[3] * quantity:.2f}")
                 
             except ValueError:
                 print("❌ Invalid input!")
@@ -879,41 +586,28 @@ class OnlineShopApp:
             input("\nPress Enter...")
             return
         
-        # ============================================================
-        # 💳 PAYMENT SELECTION
-        # ============================================================
+        # Payment selection
         print("\n" + "=" * 50)
         print("💳 SELECT PAYMENT METHOD")
         print("=" * 50)
-        print("1. 💳 Credit Card (Online Payment)")
-        print("2. 🏦 Debit Card (Online Payment)")
-        print("3. 💵 Cash on Delivery")
-        print("4. 📱 Online Payment (Wallet)")
-        print("5. 🪙 Crypto Currency")
+        methods = self.payment_service.get_payment_methods()
+        for i, m in enumerate(methods, 1):
+            print(f"{i}. {m['name']}")
         print("-" * 50)
         
         method_choice = input("Choose payment method (1-5): ")
-        method_map = {
-            '1': ('credit_card', 'Credit Card'),
-            '2': ('debit_card', 'Debit Card'),
-            '3': ('cash_on_delivery', 'Cash on Delivery'),
-            '4': ('online_payment', 'Digital Wallet'),
-            '5': ('crypto', 'Crypto Currency')
-        }
+        method_map = {str(i+1): m for i, m in enumerate(methods)}
         
         if method_choice not in method_map:
             print("❌ Invalid payment method!")
             input("\nPress Enter...")
             return
         
-        payment_method, method_display = method_map[method_choice]
+        payment_method = method_map[method_choice]
         
-        # ============================================================
-        # ⏳ SIMULATE PAYMENT
-        # ============================================================
         print("\n" + "=" * 50)
         print("⏳ Processing payment...")
-        print(f"💳 Method: {method_display}")
+        print(f"💳 Method: {payment_method['name']}")
         print("-" * 50)
         
         is_successful = random.random() < 0.95
@@ -926,79 +620,22 @@ class OnlineShopApp:
             print("💡 Please try again or use another method.")
             status = 'failed'
         
-        # ============================================================
-        # 📝 CREATE ORDER
-        # ============================================================
         try:
-            # Insert order
-            order_query = """
-                INSERT INTO [Order] (User_ID, Address_ID, Order_Date, Total_Amount)
-                VALUES (?, ?, GETDATE(), 0)
-            """
-            self.db.execute_command(order_query, (self.current_user[0], address_id))
-            
-            order_id_query = "SELECT MAX(Order_ID) FROM [Order]"
-            result = self.db.execute_query(order_id_query)
-            order_id = result[0][0] if result else None
+            order_id, total = self.order_service.create(self.current_user['id'], address_id, items)
             
             if not order_id:
                 raise Exception("Failed to create order!")
             
-            # Insert order items with variant info
-            for item in items:
-                item_query = """
-                    INSERT INTO Order_Item (Order_ID, Product_ID, Quantity, Price)
-                    VALUES (?, ?, ?, ?)
-                """
-                self.db.execute_command(item_query, (
-                    order_id, item['product_id'], item['quantity'], item['price']
-                ))
-                
-                update_stock = "UPDATE Product SET Stock_Quantity = Stock_Quantity - ? WHERE Product_ID = ?"
-                self.db.execute_command(update_stock, (item['quantity'], item['product_id']))
+            self.payment_service.create(order_id, total, payment_method['id'], status)
             
-            update_total = "UPDATE [Order] SET Total_Amount = ? WHERE Order_ID = ?"
-            self.db.execute_command(update_total, (total, order_id))
-            
-            # Insert payment
-            transaction_id = f"TXN-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(1000, 9999)}"
-            tracking_code = f"TRK-{order_id}-{random.randint(10000, 99999)}"
-            
-            payment_query = """
-                INSERT INTO Payment (
-                    Order_ID, Payment_Date, Amount, Payment_Method, Payment_Status,
-                    Transaction_ID, Tracking_Code, Approved_Date, Payment_Note
-                )
-                VALUES (?, GETDATE(), ?, ?, ?, ?, ?, ?, ?)
-            """
-            
-            approved_date = datetime.date.today() if status == 'success' else None
-            note = f"Order #{order_id} - {method_display}"
-            
-            self.db.execute_command(payment_query, (
-                order_id,
-                total,
-                payment_method,
-                status,
-                transaction_id,
-                tracking_code,
-                approved_date,
-                note
-            ))
-            
-            # ============================================================
-            # 📋 SHOW ORDER SUMMARY
-            # ============================================================
             print("\n" + "=" * 50)
             print("📋 ORDER SUMMARY")
             print("=" * 50)
             print(f"🆔 Order ID: {order_id}")
             print(f"📅 Date: {datetime.date.today()}")
             print(f"💰 Total: ${total}")
-            print(f"💳 Payment: {method_display}")
+            print(f"💳 Payment: {payment_method['name']}")
             print(f"📊 Status: {'✅ Success' if status == 'success' else '❌ Failed'}")
-            print(f"🔢 Transaction ID: {transaction_id}")
-            print(f"📌 Tracking Code: {tracking_code}")
             
             print("\n📦 Items:")
             for item in items:
@@ -1011,10 +648,8 @@ class OnlineShopApp:
             
             if status == 'success':
                 print("\n✅ Your order has been placed successfully!")
-                print("📧 A confirmation email will be sent to you.")
             else:
                 print("\n❌ Payment failed. Please try again.")
-            
             print("=" * 50)
             
         except Exception as e:
@@ -1023,27 +658,12 @@ class OnlineShopApp:
         input("\nPress Enter...")
     
     def show_my_orders(self):
-        """Show current user's orders with payment details (merged view)"""
         self.clear_screen()
         print("=" * 80)
         print("📋 MY ORDERS & TRANSACTIONS")
         print("=" * 80)
         
-        query = """
-            SELECT o.Order_ID, o.Order_Date, o.Total_Amount, 
-                   COUNT(oi.Order_Item_ID) AS Item_Count,
-                   p.Payment_Method, p.Payment_Status, p.Transaction_ID,
-                   p.Tracking_Code, p.Approved_Date, p.Amount
-            FROM [Order] o
-            LEFT JOIN Order_Item oi ON o.Order_ID = oi.Order_ID
-            LEFT JOIN Payment p ON o.Order_ID = p.Order_ID
-            WHERE o.User_ID = ?
-            GROUP BY o.Order_ID, o.Order_Date, o.Total_Amount,
-                     p.Payment_Method, p.Payment_Status, p.Transaction_ID,
-                     p.Tracking_Code, p.Approved_Date, p.Amount
-            ORDER BY o.Order_Date DESC
-        """
-        orders = self.db.execute_query(query, (self.current_user[0],))
+        orders = self.order_service.get_user_orders(self.current_user['id'])
         
         if orders:
             for o in orders:
@@ -1064,14 +684,7 @@ class OnlineShopApp:
                     print(f"✅ Approved: {o[8]}")
                 print("=" * 70)
                 
-                # نمایش جزئیات سفارش
-                detail_query = """
-                    SELECT p.Product_Name, oi.Quantity, oi.Price
-                    FROM Order_Item oi
-                    INNER JOIN Product p ON oi.Product_ID = p.Product_ID
-                    WHERE oi.Order_ID = ?
-                """
-                details = self.db.execute_query(detail_query, (o[0],))
+                details = self.order_service.get_order_details(o[0])
                 if details:
                     print("📦 Items:")
                     for d in details:
@@ -1082,19 +695,16 @@ class OnlineShopApp:
         input("\nPress Enter...")
     
     # ============================================================
-    # REVIEW FUNCTIONS (Customers only)
+    # REVIEW FUNCTIONS
     # ============================================================
     
     def rate_product(self):
-        """Submit a rating and review for a product (Customer only)"""
         self.clear_screen()
         print("=" * 50)
         print("⭐ RATE A PRODUCT")
         print("=" * 50)
         
-        # Show all products
-        query = "SELECT Product_ID, Product_Name, Price FROM Product"
-        products = self.db.execute_query(query)
+        products = self.review_service.get_all_products()
         
         if not products:
             print("❌ No products available!")
@@ -1107,17 +717,13 @@ class OnlineShopApp:
         
         try:
             product_id = int(input("\nSelect Product ID: "))
-            
-            check_query = "SELECT Product_Name FROM Product WHERE Product_ID = ?"
-            result = self.db.execute_query(check_query, (product_id,))
-            if not result:
+            product_name = self.product_service.get_by_id(product_id)
+            if not product_name:
                 print("❌ Invalid product ID!")
                 input("\nPress Enter...")
                 return
             
-            check_review = "SELECT COUNT(*) FROM Review WHERE User_ID = ? AND Product_ID = ?"
-            review_result = self.db.execute_query(check_review, (self.current_user[0], product_id))
-            if review_result and review_result[0][0] > 0:
+            if self.review_service.has_user_reviewed(self.current_user['id'], product_id):
                 print("⚠️ You have already reviewed this product!")
                 update = input("Would you like to update your review? (y/n): ")
                 if update.lower() == 'y':
@@ -1125,49 +731,38 @@ class OnlineShopApp:
                     input("\nPress Enter to continue...")
                 return
             
-            print(f"\n📝 Reviewing: {result[0][0]}")
+            print(f"\n📝 Reviewing: {product_name[0][1]}")
             print("\nRating: 0.0 = Very Bad, 5.0 = Excellent")
-            print("💡 You can use decimal numbers (e.g., 4.5, 3.7)")
             
             rating_input = input("Rating (0.0 - 5.0): ")
             rating = float(rating_input)
-            
             if rating < 0 or rating > 5:
                 print("❌ Rating must be between 0 and 5!")
                 input("\nPress Enter...")
                 return
-            
             rating = round(rating, 1)
             
             comment = input("Comment (optional): ")
             if not comment:
                 comment = None
             
-            insert_query = """
-                INSERT INTO Review (User_ID, Product_ID, Rating, Comment, Created_At)
-                VALUES (?, ?, ?, ?, GETDATE())
-            """
-            if self.db.execute_command(insert_query, (self.current_user[0], product_id, rating, comment)):
+            if self.review_service.create(self.current_user['id'], product_id, rating, comment):
                 print(f"\n✅ Review submitted successfully! Rating: {rating:.1f}")
             else:
                 print("\n❌ Failed to submit review!")
-                
         except ValueError:
             print("❌ Invalid input! Please enter a number (e.g., 4.5)")
         
         input("\nPress Enter to continue...")
     
     def update_review(self, product_id):
-        """Update existing review"""
         print("\n✏️ Update your review")
         print("Leave blank to keep current value.")
         
-        # Get current review
-        query = """
-            SELECT Rating, Comment FROM Review 
-            WHERE User_ID = ? AND Product_ID = ?
-        """
-        current = self.db.execute_query(query, (self.current_user[0], product_id))
+        current = self.db.execute_query(
+            "SELECT Rating, Comment FROM Review WHERE User_ID = ? AND Product_ID = ?",
+            (self.current_user['id'], product_id)
+        )
         
         if not current:
             print("❌ You haven't reviewed this product yet!")
@@ -1191,32 +786,20 @@ class OnlineShopApp:
             if not new_comment:
                 new_comment = current[0][1]
             
-            update_query = """
-                UPDATE Review 
-                SET Rating = ?, Comment = ? 
-                WHERE User_ID = ? AND Product_ID = ?
-            """
-            if self.db.execute_command(update_query, (new_rating, new_comment, self.current_user[0], product_id)):
+            if self.review_service.update(self.current_user['id'], product_id, new_rating, new_comment):
                 print(f"\n✅ Review updated successfully! New Rating: {new_rating:.1f}")
             else:
                 print("\n❌ Failed to update review!")
-                
         except ValueError:
             print("❌ Invalid input! Please enter a number (e.g., 4.5)")
     
     def view_product_reviews(self):
-        """View all reviews for a specific product"""
         self.clear_screen()
         print("=" * 50)
         print("📝 VIEW PRODUCT REVIEWS")
         print("=" * 50)
         
-        # Show all products
-        query = """
-            SELECT Product_ID, Product_Name, Price
-            FROM Product
-        """
-        products = self.db.execute_query(query)
+        products = self.review_service.get_all_products()
         
         if not products:
             print("❌ No products available!")
@@ -1229,34 +812,19 @@ class OnlineShopApp:
         
         try:
             product_id = int(input("\nSelect Product ID: "))
-            
-            # Get product name
-            product_query = "SELECT Product_Name FROM Product WHERE Product_ID = ?"
-            product_result = self.db.execute_query(product_query, (product_id,))
-            if not product_result:
+            product_name = self.product_service.get_by_id(product_id)
+            if not product_name:
                 print("❌ Invalid product ID!")
                 input("\nPress Enter...")
                 return
             
-            print(f"\n📝 Reviews for: {product_result[0][0]}")
+            print(f"\n📝 Reviews for: {product_name[0][1]}")
             print("-" * 50)
             
-            # Get reviews with user name
-            review_query = """
-                SELECT u.Name, r.Rating, r.Comment, r.Created_At
-                FROM Review r
-                INNER JOIN [User] u ON r.User_ID = u.User_ID
-                WHERE r.Product_ID = ?
-                ORDER BY r.Created_At DESC
-            """
-            reviews = self.db.execute_query(review_query, (product_id,))
+            reviews = self.review_service.get_product_reviews(product_id)
+            avg_rating = self.review_service.get_avg_rating(product_id)
             
             if reviews:
-                # Calculate average
-                avg_query = "SELECT AVG(Rating) FROM Review WHERE Product_ID = ?"
-                avg_result = self.db.execute_query(avg_query, (product_id,))
-                avg_rating = avg_result[0][0] if avg_result and avg_result[0][0] else 0
-                
                 print(f"⭐ Average Rating: {avg_rating:.2f}/5.0")
                 print(f"📊 Total Reviews: {len(reviews)}")
                 print("-" * 50)
@@ -1266,7 +834,6 @@ class OnlineShopApp:
                     full_stars = int(rating)
                     half_star = 1 if (rating - full_stars) >= 0.5 else 0
                     empty_stars = 5 - full_stars - half_star
-                    
                     stars_display = "⭐" * full_stars + "½" * half_star + "☆" * empty_stars
                     
                     print(f"👤 {r[0]}")
@@ -1277,17 +844,16 @@ class OnlineShopApp:
             else:
                 print("❌ No reviews yet for this product!")
                 print("💡 Be the first to review this product!")
-                
         except ValueError:
             print("❌ Invalid input!")
         
         input("\nPress Enter...")
     
     # ============================================================
-    # MAIN RUN LOOP
+    # MAIN LOOP
     # ============================================================
+    
     def run(self):
-        """Main application loop"""
         if not self.db.connect():
             print("❌ Cannot connect to database!")
             return
@@ -1297,7 +863,6 @@ class OnlineShopApp:
             choice = input("Your choice: ")
             
             if not self.current_user:
-                # Not logged in
                 if choice == '1':
                     self.register()
                 elif choice == '2':
@@ -1305,8 +870,7 @@ class OnlineShopApp:
                 elif choice == '0':
                     break
             else:
-                if self.current_user[2] == 'seller':
-                    # Seller menu
+                if self.current_user['type'] == 'seller':
                     if choice == '1':
                         self.show_products()
                     elif choice == '2':
@@ -1328,7 +892,6 @@ class OnlineShopApp:
                     elif choice == '0':
                         break
                 else:
-                    # Customer menu
                     if choice == '1':
                         self.show_products()
                     elif choice == '2':
